@@ -37,6 +37,13 @@ header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:v
 .brand{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:-.01em}
 .brand svg{flex:none}
 .repo{font-family:var(--font-code);font-size:13px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo-sel{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:5px 8px;font-family:var(--font-code);font-size:13px;max-width:min(280px,62vw);min-width:0}
+.rlist{display:flex;flex-direction:column;gap:6px;max-height:220px;overflow:auto}
+.ritem{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;min-width:0}
+.ritem .mono{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.ritem .btn{padding:2px 10px;font-size:12px}
+.addrow{display:flex;gap:8px;flex-wrap:wrap}.addrow input{flex:1;min-width:0}
+.sub{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0}
 .mode{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
 .spacer{flex:1}
 .tabs{display:flex;background:var(--sunk);border-radius:8px;padding:3px}
@@ -144,7 +151,7 @@ a.link{color:var(--accent);font-weight:500}
     Pocket Git Viewer
   </div>
   <span class="mode" id="modeTag">Sample repo</span>
-  <span class="repo" id="repoName">acme/orders-api</span>
+  <select class="repo-sel" id="repoSel" aria-label="Repository"></select>
   <span class="spacer"></span>
   <div class="tabs" role="tablist">
     <button role="tab" id="tabHistory" aria-selected="true">History</button>
@@ -170,16 +177,23 @@ a.link{color:var(--accent);font-weight:500}
 
 <div class="sheet" id="sheet" hidden>
   <form class="card" id="cfgForm">
-    <h2>Connect a GitHub repo</h2>
-    <p class="note" style="margin:0">Use a fine-grained personal access token with read-only access to <b>Contents</b>, <b>Metadata</b> and <b>Pull requests</b> for the repos you need. The token is sent only to api.github.com.</p>
-    <div class="field"><label for="cfgRepo">Repository (owner/name)</label><input type="text" id="cfgRepo" placeholder="your-org/your-repo" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+    <h2>Repos and token</h2>
+    <p class="note" style="margin:0">One fine-grained personal access token covers all your repos. Give it read-only access to <b>Contents</b>, <b>Metadata</b> and <b>Pull requests</b>. It is sent only to api.github.com.</p>
     <div class="field"><label for="cfgToken">Token</label><input type="password" id="cfgToken" placeholder="github_pat_…" autocomplete="off"></div>
-    <label class="check"><input type="checkbox" id="cfgRemember"> Remember on this device</label>
+    <label class="check"><input type="checkbox" id="cfgRemember"> Remember the token on this device</label>
+    <p class="sub">Your repos</p>
+    <div class="rlist" id="repoList"></div>
+    <div class="addrow">
+      <input type="text" id="cfgRepo" placeholder="owner/name" aria-label="Add a repo by name" autocomplete="off" autocapitalize="off" spellcheck="false" class="mono" style="border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 10px;font-size:13px">
+      <button type="button" class="btn" id="addRepo">Add</button>
+      <button type="button" class="btn" id="findRepos">Find my repos</button>
+    </div>
+    <div class="rlist" id="pickList" hidden></div>
     <div class="err" id="cfgErr" hidden></div>
     <div class="row-btns">
       <button type="button" class="btn" id="useSample">Use sample repo</button>
       <button type="button" class="btn" id="cfgCancel">Cancel</button>
-      <button type="submit" class="btn primary" id="cfgSave">Connect</button>
+      <button type="submit" class="btn primary" id="cfgSave">Save</button>
     </div>
   </form>
 </div>
@@ -318,16 +332,16 @@ const SAMPLE = (() => {
 
 /* ---------- Data source: sample or GitHub API ---------- */
 const state = {
-  live:false, repo:"acme/orders-api", token:"",
+  live:false, repo:"acme/orders-api", token:"", repos:[],
   branches:[], commits:new Map(), order:[], focus:null, selected:null,
   view:"history", cmpHead:null, cmpBase:"staging", loading:false, error:""
 };
 
-async function gh(path){
+async function gh(path, token){
   let res;
   try {
     res = await fetch("https://api.github.com" + path, {headers:{
-      "Accept":"application/vnd.github+json", "Authorization":"Bearer " + state.token, "X-GitHub-Api-Version":"2022-11-28"}});
+      "Accept":"application/vnd.github+json", "Authorization":"Bearer " + (token || state.token), "X-GitHub-Api-Version":"2022-11-28"}});
   } catch(e){
     throw new Error("This page can't reach api.github.com from here. The claude.ai preview blocks outside connections; open the copy hosted on GitHub Pages (or your laptop) to use your real repo.");
   }
@@ -365,6 +379,7 @@ async function loadRepo(){
       state.cmpHead = feature ? feature.name : (state.branches[0] && state.branches[0].name);
     }
     if (!state.branches.find(b=>b.name===state.cmpBase)) state.cmpBase = (state.branches.find(b=>b.name==="main"||b.name==="master")||state.branches[0]||{}).name;
+    if (state.focus && !state.branches.find(b=>b.name===state.focus)) state.focus = null;
     state.order = topoOrder();
     state.selected = state.order[0] || null;
   } catch(e){ state.error = e.message || String(e); }
@@ -561,7 +576,7 @@ function renderDetail(){
 }
 function render(){
   $("modeTag").textContent = state.live ? "Live" : "Sample repo";
-  $("repoName").textContent = state.repo;
+  renderRepoSelect();
   $("connectBtn").textContent = state.live ? "Settings" : "Connect GitHub";
   $("tabHistory").setAttribute("aria-selected", state.view==="history");
   $("tabCompare").setAttribute("aria-selected", state.view==="compare");
@@ -578,7 +593,7 @@ document.addEventListener("click", e => {
   if (!t) return;
   if (t.id === "errSettings") return openSheet();
   if (t.hasAttribute("data-close")) return $("detailPane").classList.remove("open");
-  if (t.hasAttribute("data-branch")){ state.focus = t.dataset.branch || null; if (state.view!=="history"){ state.view="history"; } render(); return; }
+  if (t.hasAttribute("data-branch")){ state.focus = t.dataset.branch || null; if (state.live) store.set("pgv.focus." + state.repo, state.focus || ""); if (state.view!=="history"){ state.view="history"; } render(); return; }
   if (t.dataset.sha){
     if (state.view === "compare"){
       const c = state.commits.get(t.dataset.sha) || null;
@@ -598,29 +613,91 @@ $("tabHistory").onclick = () => { state.view = "history"; render(); };
 $("tabCompare").onclick = () => { state.view = "compare"; render(); $("detailPane").classList.remove("open"); };
 $("reloadBtn").onclick = () => { cmpCache.clear(); loadRepo(); };
 
-function openSheet(){
-  $("cfgRepo").value = state.live ? state.repo : (store.get("pgv.repo") || "");
+/* ---------- Repos, token and settings ---------- */
+const SAMPLE_REPO = "acme/orders-api";
+const normRepo = v => v.trim().replace(/^https?:\/\/github\.com\//,"").replace(/\.git$/,"").replace(/\/$/,"");
+const validRepo = v => /^[\w.-]+\/[\w.-]+$/.test(v);
+function saveRepos(){ store.set("pgv.repos", JSON.stringify(state.repos)); }
+function renderRepoSelect(){
+  const sel = $("repoSel");
+  sel.innerHTML = state.repos.map(r => `<option value="${esc(r)}" ${state.live && r===state.repo?"selected":""}>${esc(r)}</option>`).join("")
+    + `<option value="__sample" ${!state.live?"selected":""}>Sample: ${SAMPLE_REPO}</option>`
+    + `<option value="__manage">Add or manage repos…</option>`;
+}
+function switchRepo(repo){
+  if (repo === "__sample"){ state.live = false; state.repo = SAMPLE_REPO; store.set("pgv.repo", "__sample"); }
+  else { state.live = true; state.repo = repo; store.set("pgv.repo", repo); }
+  state.focus = state.live ? (store.get("pgv.focus." + repo) || null) : null;
+  state.cmpHead = null; state.cmpBase = "staging"; state.selected = null; cmpCache.clear();
+  $("detailPane").classList.remove("open");
+  loadRepo();
+}
+$("repoSel").addEventListener("change", e => {
+  const v = e.target.value;
+  if (v === "__manage"){ renderRepoSelect(); return openSheet(); }
+  if (v !== "__sample" && !state.token){ renderRepoSelect(); return openSheet("Paste your token to open " + v + "."); }
+  switchRepo(v);
+});
+
+let draft = [];
+function renderDraft(){
+  $("repoList").innerHTML = draft.length ? draft.map(r => `<div class="ritem"><span class="mono">${esc(r)}</span><button type="button" class="btn" data-remove="${esc(r)}">Remove</button></div>`).join("")
+    : `<p class="note" style="margin:0">No repos yet. Add one by name, or tap Find my repos.</p>`;
+}
+function showErr(m){ $("cfgErr").textContent = m; $("cfgErr").hidden = !m; }
+function openSheet(msg){
+  draft = state.repos.slice();
   $("cfgToken").value = state.token;
   $("cfgRemember").checked = !!store.get("pgv.token");
-  $("cfgErr").hidden = true; $("sheet").hidden = false; $("cfgRepo").focus();
+  $("cfgRepo").value = ""; $("pickList").hidden = true; $("pickList").innerHTML = "";
+  renderDraft(); showErr(typeof msg === "string" ? msg : "");
+  $("sheet").hidden = false; (state.token ? $("cfgRepo") : $("cfgToken")).focus();
 }
-$("connectBtn").onclick = openSheet;
+function addDraft(r){ if (!draft.includes(r)) draft.push(r); renderDraft(); }
+$("addRepo").onclick = () => {
+  const r = normRepo($("cfgRepo").value);
+  if (!validRepo(r)) return showErr("Enter the repo as owner/name, for example your-org/orders-api.");
+  addDraft(r); $("cfgRepo").value = ""; showErr("");
+};
+$("cfgRepo").addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); $("addRepo").click(); } });
+$("findRepos").onclick = async () => {
+  const token = $("cfgToken").value.trim();
+  if (!token) return showErr("Paste your token first, then tap Find my repos.");
+  const box = $("pickList"); box.hidden = false; box.innerHTML = `<p class="note" style="margin:0"><span class="spin"></span> Looking up repos this token can read…</p>`; showErr("");
+  try {
+    const list = await gh("/user/repos?per_page=100&sort=pushed", token);
+    const names = list.map(r => r.full_name).filter(n => !draft.includes(n));
+    box.innerHTML = names.length ? names.map(n => `<div class="ritem"><span class="mono">${esc(n)}</span><button type="button" class="btn" data-pick="${esc(n)}">Add</button></div>`).join("")
+      : `<p class="note" style="margin:0">No other repos found for this token.</p>`;
+  } catch(e){ box.hidden = true; showErr(e.message); }
+};
+$("sheet").addEventListener("click", e => {
+  const rm = e.target.closest("[data-remove]"), pk = e.target.closest("[data-pick]");
+  if (rm){ draft = draft.filter(r => r !== rm.dataset.remove); renderDraft(); }
+  if (pk){ addDraft(pk.dataset.pick); pk.closest(".ritem").remove(); }
+});
+$("connectBtn").onclick = () => openSheet();
 $("cfgCancel").onclick = () => { $("sheet").hidden = true; };
-$("useSample").onclick = () => { state.live = false; state.repo = "acme/orders-api"; state.token = ""; store.del("pgv.token"); store.del("pgv.repo"); cmpCache.clear(); state.focus=null; $("sheet").hidden = true; loadRepo(); };
+$("useSample").onclick = () => { $("sheet").hidden = true; switchRepo("__sample"); };
 $("cfgForm").addEventListener("submit", e => {
   e.preventDefault();
-  const repo = $("cfgRepo").value.trim().replace(/^https?:\/\/github\.com\//,"").replace(/\.git$/,"").replace(/\/$/,"");
+  const pending = normRepo($("cfgRepo").value);
+  if (pending && validRepo(pending)) addDraft(pending);
   const token = $("cfgToken").value.trim();
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)){ $("cfgErr").textContent = "Enter the repository as owner/name, for example your-org/orders-api."; $("cfgErr").hidden = false; return; }
-  if (!token){ $("cfgErr").textContent = "Paste a GitHub token to read a private repo."; $("cfgErr").hidden = false; return; }
-  state.live = true; state.repo = repo; state.token = token; state.focus = null; cmpCache.clear();
-  if ($("cfgRemember").checked){ store.set("pgv.token", token); store.set("pgv.repo", repo); } else { store.del("pgv.token"); store.set("pgv.repo", repo); }
-  $("sheet").hidden = true; loadRepo();
+  if (!draft.length) return showErr("Add at least one repo, or use the sample repo.");
+  if (!token) return showErr("Paste a GitHub token to read your repos.");
+  state.repos = draft.slice(); state.token = token; saveRepos();
+  if ($("cfgRemember").checked) store.set("pgv.token", token); else store.del("pgv.token");
+  $("sheet").hidden = true;
+  switchRepo(state.live && state.repos.includes(state.repo) ? state.repo : state.repos[0]);
 });
 
 /* boot */
-const savedTok = store.get("pgv.token"), savedRepo = store.get("pgv.repo");
-if (savedTok && savedRepo){ state.live = true; state.token = savedTok; state.repo = savedRepo; }
+try { const r = JSON.parse(store.get("pgv.repos") || "[]"); if (Array.isArray(r)) state.repos = r.filter(validRepo); } catch(e){}
+state.token = store.get("pgv.token") || "";
+const last = store.get("pgv.repo");
+if (last && last !== "__sample" && !state.repos.includes(last) && validRepo(last)) { state.repos.push(last); saveRepos(); }
+if (state.token && last && last !== "__sample" && state.repos.includes(last)){ state.live = true; state.repo = last; state.focus = store.get("pgv.focus." + last) || null; }
 loadRepo();
 })();
 </script>
