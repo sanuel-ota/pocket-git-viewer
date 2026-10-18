@@ -1,0 +1,626 @@
+<title>Pocket Git Viewer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: three panes on iPad landscape (branches | history graph | commit detail); one column with a slide-over detail sheet on phones */
+:root{
+  --bg:#f3f5f8; --panel:#ffffff; --sunk:#e9edf3; --line:#d6dce6; --fg:#18202c; --muted:#5d6878;
+  --accent:#2f55d4; --accent-soft:#e3e9fb;
+  --add-bg:#e2f5e7; --add-fg:#16653a; --del-bg:#fbe5e5; --del-fg:#a3262b; --hunk:#eef1f7;
+  --l0:#2f55d4; --l1:#d9480f; --l2:#2b8a3e; --l3:#ae3ec9; --l4:#0c8599; --l5:#c2255c;
+  --font-ui:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-code:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11151c; --panel:#171c25; --sunk:#1e2430; --line:#2b3342; --fg:#e4e8ef; --muted:#93a0b4;
+  --accent:#7d9bff; --accent-soft:#232d4a;
+  --add-bg:#163322; --add-fg:#8ce0a6; --del-bg:#3a1b1e; --del-fg:#ffa3a6; --hunk:#1d2433;
+  --l0:#7d9bff; --l1:#ff8f5a; --l2:#69d38a; --l3:#da8bf0; --l4:#5fd0e2; --l5:#ff7aa8;
+  color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#11151c; --panel:#171c25; --sunk:#1e2430; --line:#2b3342; --fg:#e4e8ef; --muted:#93a0b4;
+  --accent:#7d9bff; --accent-soft:#232d4a;
+  --add-bg:#163322; --add-fg:#8ce0a6; --del-bg:#3a1b1e; --del-fg:#ffa3a6; --hunk:#1d2433;
+  --l0:#7d9bff; --l1:#ff8f5a; --l2:#69d38a; --l3:#da8bf0; --l4:#5fd0e2; --l5:#ff7aa8;
+  color-scheme:dark;}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-ui);font-size:15px;line-height:1.45;display:flex;flex-direction:column}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--panel)}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--font-code)}
+
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;background:var(--panel);border-bottom:1px solid var(--line);
+  padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:-.01em}
+.brand svg{flex:none}
+.repo{font-family:var(--font-code);font-size:13px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mode{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
+.spacer{flex:1}
+.tabs{display:flex;background:var(--sunk);border-radius:8px;padding:3px}
+.tabs button{border:0;background:none;padding:5px 14px;border-radius:6px;font-weight:500;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--panel);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;font-weight:500}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+.iconbtn{border:1px solid var(--line);background:var(--panel);border-radius:8px;width:36px;height:34px;display:grid;place-items:center}
+
+main{flex:1;min-height:0;display:grid;grid-template-columns:230px minmax(0,1fr) minmax(0,1.15fr)}
+.pane{min-height:0;overflow:auto;border-right:1px solid var(--line)}
+.pane:last-child{border-right:0}
+.pane-h{position:sticky;top:0;z-index:2;background:var(--bg);padding:12px 16px 8px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+
+/* branches */
+.branches{display:flex;flex-direction:column;gap:2px;padding:0 8px 16px}
+.branch{display:flex;align-items:center;gap:8px;border:0;background:none;text-align:left;padding:8px;border-radius:8px;min-width:0}
+.branch:hover{background:var(--sunk)}
+.branch[aria-pressed="true"]{background:var(--accent-soft)}
+.branch .dot{width:10px;height:10px;border-radius:50%;flex:none}
+.branch .name{font-family:var(--font-code);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.branch .tag{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.hint{font-size:13px;color:var(--muted);padding:4px 16px 12px}
+
+/* history */
+.rows{padding-bottom:24px}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:stretch;border:0;background:none;width:100%;text-align:left;padding:0 16px 0 8px;min-height:52px}
+.row:hover{background:var(--sunk)}
+.row[aria-current="true"]{background:var(--accent-soft)}
+.row svg{display:block}
+.row .txt{padding:7px 0 7px 4px;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.row .msg{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .meta{font-size:12px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+.refs{display:inline-flex;gap:4px;flex-wrap:wrap;margin-right:4px;vertical-align:1px}
+.ref{font-family:var(--font-code);font-size:11px;font-weight:500;padding:0 6px;border-radius:4px;border:1px solid currentColor;white-space:nowrap}
+.row.dim{opacity:.45}
+
+/* detail */
+.detail{padding:4px 16px 32px;display:flex;flex-direction:column;gap:14px}
+.back{display:none}
+.dt-title{font-size:19px;font-weight:600;line-height:1.3;text-wrap:balance;margin:0}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.stat{font-family:var(--font-code);font-size:12px;font-variant-numeric:tabular-nums}
+.stat .a{color:var(--add-fg)}.stat .d{color:var(--del-fg)}
+.file{border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
+.file summary{list-style:none;display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;background:var(--sunk);min-width:0}
+.file summary::-webkit-details-marker{display:none}
+.file summary .fn{font-family:var(--font-code);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.badge{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:4px;flex:none}
+.badge.added{background:var(--add-bg);color:var(--add-fg)}.badge.removed{background:var(--del-bg);color:var(--del-fg)}
+.badge.modified,.badge.renamed{background:var(--accent-soft);color:var(--accent)}
+.diff{overflow-x:auto}
+.diff table{border-collapse:collapse;font-family:var(--font-code);font-size:12px;line-height:1.55;min-width:100%}
+.diff td{padding:0 8px;white-space:pre;vertical-align:top}
+.diff td.n{color:var(--muted);text-align:right;user-select:none;width:1%;font-variant-numeric:tabular-nums;padding:0 6px}
+.diff tr.add{background:var(--add-bg)}.diff tr.add td.c{color:var(--add-fg)}
+.diff tr.del{background:var(--del-bg)}.diff tr.del td.c{color:var(--del-fg)}
+.diff tr.hunk td{background:var(--hunk);color:var(--muted)}
+.empty{color:var(--muted);font-size:14px;padding:24px 16px}
+
+/* compare */
+.cmp-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:0 16px 12px}
+.cmp-bar select{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 8px;font-family:var(--font-code);font-size:13px;max-width:100%}
+.ab{display:flex;gap:10px;flex-wrap:wrap;padding:0 16px 12px}
+.ab div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px}
+.ab b{font-size:18px;font-variant-numeric:tabular-nums;margin-right:4px}
+.note{font-size:13px;color:var(--muted)}
+a.link{color:var(--accent);font-weight:500}
+
+/* settings sheet */
+.sheet{position:fixed;inset:0;z-index:20;background:rgba(10,14,22,.45);display:grid;place-items:center;
+  padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;width:min(460px,100%);max-height:100%;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:14px}
+.card h2{margin:0;font-size:18px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:13px;font-weight:500}
+.field input[type=text],.field input[type=password]{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:8px 10px;font-family:var(--font-code);font-size:13px;width:100%}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+.err{color:var(--del-fg);font-size:13px}
+.row-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+
+/* narrow: iPad portrait & phone */
+@media (max-width:1000px){
+  main{grid-template-columns:minmax(0,1fr)}
+  #branchPane{display:none}
+  #detailPane{position:fixed;inset:0;z-index:15;background:var(--bg);border:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+    padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+  #detailPane:not(.open){display:none}
+  .back{display:inline-flex}
+  .chips{display:flex}
+}
+.chips{display:none;gap:6px;overflow-x:auto;padding:10px 16px 4px;scrollbar-width:none}
+.chips .branch{flex:none;border:1px solid var(--line);background:var(--panel);padding:5px 10px;border-radius:99px}
+.chips .branch .name{max-width:200px}
+</style>
+
+<header>
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M6 3v16M6 8c0 4 10 2 10 7" fill="none" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"/><circle cx="6" cy="4" r="2.6" fill="var(--accent)"/><circle cx="6" cy="18" r="2.6" fill="var(--accent)"/><circle cx="16" cy="15" r="2.6" fill="var(--l1)"/></svg>
+    Pocket Git Viewer
+  </div>
+  <span class="mode" id="modeTag">Sample repo</span>
+  <span class="repo" id="repoName">acme/orders-api</span>
+  <span class="spacer"></span>
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tabHistory" aria-selected="true">History</button>
+    <button role="tab" id="tabCompare" aria-selected="false">Compare</button>
+  </div>
+  <button class="iconbtn" id="reloadBtn" title="Reload" aria-label="Reload"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.6M13 2.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <button class="btn" id="connectBtn">Connect GitHub</button>
+</header>
+
+<main>
+  <section class="pane" id="branchPane" aria-label="Branches">
+    <div class="pane-h">Branches</div>
+    <div class="branches" id="branchList"></div>
+  </section>
+  <section class="pane" id="centerPane" aria-label="History">
+    <div class="chips" id="branchChips"></div>
+    <div id="center"></div>
+  </section>
+  <section class="pane" id="detailPane" aria-label="Details">
+    <div id="detail"></div>
+  </section>
+</main>
+
+<div class="sheet" id="sheet" hidden>
+  <form class="card" id="cfgForm">
+    <h2>Connect a GitHub repo</h2>
+    <p class="note" style="margin:0">Use a fine-grained personal access token with read-only access to <b>Contents</b>, <b>Metadata</b> and <b>Pull requests</b> for the repos you need. The token is sent only to api.github.com.</p>
+    <div class="field"><label for="cfgRepo">Repository (owner/name)</label><input type="text" id="cfgRepo" placeholder="your-org/your-repo" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+    <div class="field"><label for="cfgToken">Token</label><input type="password" id="cfgToken" placeholder="github_pat_…" autocomplete="off"></div>
+    <label class="check"><input type="checkbox" id="cfgRemember"> Remember on this device</label>
+    <div class="err" id="cfgErr" hidden></div>
+    <div class="row-btns">
+      <button type="button" class="btn" id="useSample">Use sample repo</button>
+      <button type="button" class="btn" id="cfgCancel">Cancel</button>
+      <button type="submit" class="btn primary" id="cfgSave">Connect</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const LANES = ["--l0","--l1","--l2","--l3","--l4","--l5"];
+const laneColor = i => `var(${LANES[i % LANES.length]})`;
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } },
+  set(k,v){ try { localStorage.setItem(k,v); } catch(e){} },
+  del(k){ try { localStorage.removeItem(k); } catch(e){} }
+};
+function relTime(iso){
+  const d = new Date(iso), s = (Date.now() - d) / 1000;
+  if (s < 3600) return Math.max(1, Math.round(s/60)) + "m ago";
+  if (s < 86400) return Math.round(s/3600) + "h ago";
+  if (s < 86400*7) return Math.round(s/86400) + "d ago";
+  return d.toLocaleDateString(undefined, {day:"numeric", month:"short", year:"numeric"});
+}
+function fullTime(iso){ return new Date(iso).toLocaleString(undefined,{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }
+
+/* ---------- Sample repository (marked as sample in the header) ---------- */
+function P(lines){ return lines.join("\n"); }
+const SAMPLE = (() => {
+  const c = (sha, msg, author, date, parents, files) => ({sha, msg, author, date, parents, files});
+  const commits = [
+    c("9f3e2a17c4b1d8e0a6f5c2b9e7d4a1c3f8b6e2d0","Merge fix/TKT-142-login-timeout into staging","Sanuel","2026-10-19T00:20:00+08:00",["4c8a1e9b2d7f3a6c5e0b8d1f4a7c2e9b6d3f0a85","b71d4e8a3c9f2b6e0d5a8c1f7e4b2a9d6c3f0e18"],[]),
+    c("e25b9d4c7a1f8e3b6c0d2a9f5e8b1c4d7a3f6e92","Add /orders/export endpoint with date filters","Mei Ling","2026-10-18T22:15:00+08:00",["0d6f3b8e1a4c9d2f7b5e0a3c8d6f1b4e9a2c7d53"],[
+      {filename:"src/routes/orders.ts",status:"modified",additions:9,deletions:1,patch:P([
+        "@@ -1,6 +1,7 @@",
+        " import { Router } from \"express\";",
+        " import { listOrders, getOrder } from \"../services/orders\";",
+        "+import { exportOrdersCsv } from \"../services/export\";",
+        " import { requireAuth } from \"../middleware/auth\";",
+        " ",
+        " export const orders = Router();",
+        "@@ -18,4 +19,12 @@ orders.get(\"/:id\", requireAuth, async (req, res) => {",
+        "   res.json(await getOrder(req.params.id));",
+        " });",
+        "-",
+        "+",
+        "+orders.get(\"/export\", requireAuth, async (req, res) => {",
+        "+  const { from, to } = req.query as { from?: string; to?: string };",
+        "+  const csv = await exportOrdersCsv({ from, to });",
+        "+  res.setHeader(\"Content-Type\", \"text/csv\");",
+        "+  res.setHeader(\"Content-Disposition\", \"attachment; filename=orders.csv\");",
+        "+  res.send(csv);",
+        "+});"])}]),
+    c("b71d4e8a3c9f2b6e0d5a8c1f7e4b2a9d6c3f0e18","Retry once on 401 and refresh the access token","Sanuel","2026-10-18T21:40:00+08:00",["7a2c5f9e1b8d4a3c6f0e2b9d5a8c1e4f7b3d6a20"],[
+      {filename:"src/clients/auth.ts",status:"modified",additions:11,deletions:2,patch:P([
+        "@@ -22,10 +22,19 @@ export async function authedFetch(url: string, init: RequestInit = {}) {",
+        "   const token = await getAccessToken();",
+        "-  const res = await fetch(url, withAuth(init, token));",
+        "-  return res;",
+        "+  let res = await fetch(url, withAuth(init, token));",
+        "+  if (res.status === 401) {",
+        "+    logger.warn(\"auth: 401 from %s, refreshing token\", url);",
+        "+    const fresh = await refreshAccessToken();",
+        "+    res = await fetch(url, withAuth(init, fresh));",
+        "+  }",
+        "+  if (!res.ok) {",
+        "+    throw new HttpError(res.status, await res.text());",
+        "+  }",
+        "+  return res;",
+        " }",
+        " ",
+        " function withAuth(init: RequestInit, token: string): RequestInit {"])},
+      {filename:"test/auth.test.ts",status:"modified",additions:8,deletions:0,patch:P([
+        "@@ -40,3 +40,11 @@ describe(\"authedFetch\", () => {",
+        "     expect(res.status).toBe(200);",
+        "   });",
+        "+",
+        "+  it(\"refreshes the token once after a 401\", async () => {",
+        "+    mockFetch.mockResolvedValueOnce(new Response(\"\", { status: 401 }));",
+        "+    mockFetch.mockResolvedValueOnce(new Response(\"ok\", { status: 200 }));",
+        "+    await authedFetch(\"/me\");",
+        "+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);",
+        "+  });",
+        " });"])}]),
+    c("0d6f3b8e1a4c9d2f7b5e0a3c8d6f1b4e9a2c7d53","Scaffold CSV export service","Mei Ling","2026-10-18T15:20:00+08:00",["4c8a1e9b2d7f3a6c5e0b8d1f4a7c2e9b6d3f0a85"],[
+      {filename:"src/services/export.ts",status:"added",additions:12,deletions:0,patch:P([
+        "@@ -0,0 +1,12 @@",
+        "+import { db } from \"../db\";",
+        "+",
+        "+export async function exportOrdersCsv(range: { from?: string; to?: string }) {",
+        "+  const rows = await db.query(",
+        "+    `SELECT id, customer_id, total_cents, status, created_at",
+        "+       FROM orders WHERE created_at BETWEEN $1 AND $2 ORDER BY created_at`,",
+        "+    [range.from ?? \"1970-01-01\", range.to ?? \"now()\"]",
+        "+  );",
+        "+  const header = \"id,customer_id,total_cents,status,created_at\";",
+        "+  const lines = rows.map(r => [r.id, r.customer_id, r.total_cents, r.status, r.created_at.toISOString()].join(\",\"));",
+        "+  return [header, ...lines].join(\"\\n\");",
+        "+}"])}]),
+    c("7a2c5f9e1b8d4a3c6f0e2b9d5a8c1e4f7b3d6a20","Make auth client timeout configurable","Sanuel","2026-10-18T13:05:00+08:00",["4c8a1e9b2d7f3a6c5e0b8d1f4a7c2e9b6d3f0a85"],[
+      {filename:"src/config.ts",status:"modified",additions:2,deletions:1,patch:P([
+        "@@ -8,6 +8,7 @@ export const config = {",
+        "   port: Number(process.env.PORT ?? 3000),",
+        "   databaseUrl: required(\"DATABASE_URL\"),",
+        "-  authTimeoutMs: 5000,",
+        "+  authTimeoutMs: Number(process.env.AUTH_TIMEOUT_MS ?? 15000),",
+        "+  authRetries: Number(process.env.AUTH_RETRIES ?? 1),",
+        " };"])}]),
+    c("4c8a1e9b2d7f3a6c5e0b8d1f4a7c2e9b6d3f0a85","Merge staging into main for release 2.4.1","Sanuel","2026-10-17T18:30:00+08:00",["a1f7c3e9b5d2a8f4c6e0b3d9a7f1c5e2b8d4a6f3","3e9b6d2a8f4c1e7b5d0a9c3f6e2b8d1a4c7f5e09"],[]),
+    c("3e9b6d2a8f4c1e7b5d0a9c3f6e2b8d1a4c7f5e09","Merge fix/TKT-138-phone-validation into staging","Kumar","2026-10-16T16:10:00+08:00",["a1f7c3e9b5d2a8f4c6e0b3d9a7f1c5e2b8d4a6f3","c5a2e8f1b9d4c7a3e6f0b2d8a5c1f9e4b7d3a612"],[]),
+    c("c5a2e8f1b9d4c7a3e6f0b2d8a5c1f9e4b7d3a612","Validate phone numbers on signup (E.164)","Kumar","2026-10-15T11:45:00+08:00",["a1f7c3e9b5d2a8f4c6e0b3d9a7f1c5e2b8d4a6f3"],[
+      {filename:"src/validators/phone.ts",status:"added",additions:6,deletions:0,patch:P([
+        "@@ -0,0 +1,6 @@",
+        "+const E164 = /^\\+[1-9]\\d{7,14}$/;",
+        "+",
+        "+export function normalizePhone(input: string): string | null {",
+        "+  const cleaned = input.replace(/[\\s()-]/g, \"\");",
+        "+  return E164.test(cleaned) ? cleaned : null;",
+        "+}"])}]),
+    c("a1f7c3e9b5d2a8f4c6e0b3d9a7f1c5e2b8d4a6f3","Release 2.4.0","Sanuel","2026-10-14T10:00:00+08:00",[],[
+      {filename:"package.json",status:"modified",additions:1,deletions:1,patch:P([
+        "@@ -1,5 +1,5 @@",
+        " {",
+        "   \"name\": \"orders-api\",",
+        "-  \"version\": \"2.3.2\",",
+        "+  \"version\": \"2.4.0\",",
+        "   \"private\": true,"])}]),
+  ];
+  const branches = [
+    {name:"main", sha:"4c8a1e9b2d7f3a6c5e0b8d1f4a7c2e9b6d3f0a85", protected:true},
+    {name:"staging", sha:"9f3e2a17c4b1d8e0a6f5c2b9e7d4a1c3f8b6e2d0", protected:true},
+    {name:"feat/TKT-150-export-csv", sha:"e25b9d4c7a1f8e3b6c0d2a9f5e8b1c4d7a3f6e92"},
+    {name:"fix/TKT-142-login-timeout", sha:"b71d4e8a3c9f2b6e0d5a8c1f7e4b2a9d6c3f0e18"},
+  ];
+  return {commits, branches};
+})();
+
+/* ---------- Data source: sample or GitHub API ---------- */
+const state = {
+  live:false, repo:"acme/orders-api", token:"",
+  branches:[], commits:new Map(), order:[], focus:null, selected:null,
+  view:"history", cmpHead:null, cmpBase:"staging", loading:false, error:""
+};
+
+async function gh(path){
+  let res;
+  try {
+    res = await fetch("https://api.github.com" + path, {headers:{
+      "Accept":"application/vnd.github+json", "Authorization":"Bearer " + state.token, "X-GitHub-Api-Version":"2022-11-28"}});
+  } catch(e){
+    throw new Error("This page can't reach api.github.com from here. The claude.ai preview blocks outside connections; open the copy hosted on GitHub Pages (or your laptop) to use your real repo.");
+  }
+  if (!res.ok){
+    let m = res.status + " " + res.statusText;
+    try { const j = await res.json(); if (j.message) m = j.message + " (" + res.status + ")"; } catch(e){}
+    if (res.status === 401) m = "GitHub rejected the token. Check that it hasn't expired. (" + res.status + ")";
+    if (res.status === 404) m = "Repository not found, or the token can't see it. Check owner/name and the token's repo access. (404)";
+    throw new Error(m);
+  }
+  return res.json();
+}
+const fromApiCommit = c => ({sha:c.sha, msg:c.commit.message, author:(c.commit.author && c.commit.author.name) || (c.author && c.author.login) || "unknown",
+  date:(c.commit.committer && c.commit.committer.date) || c.commit.author.date, parents:(c.parents||[]).map(p=>p.sha), files:c.files || null});
+
+async function loadRepo(){
+  state.loading = true; state.error = ""; render();
+  try{
+    if (!state.live){
+      state.branches = SAMPLE.branches.slice();
+      state.commits = new Map(SAMPLE.commits.map(c => [c.sha, c]));
+    } else {
+      const br = await gh(`/repos/${state.repo}/branches?per_page=100`);
+      const pick = sortBranches(br.map(b => ({name:b.name, sha:b.commit.sha, protected:b.protected})));
+      state.branches = pick;
+      const map = new Map();
+      // history for the 10 most relevant branches, 30 commits each
+      const lists = await Promise.all(pick.slice(0,10).map(b => gh(`/repos/${state.repo}/commits?sha=${encodeURIComponent(b.name)}&per_page=30`).catch(()=>[])));
+      lists.flat().forEach(c => { if (!map.has(c.sha)) map.set(c.sha, fromApiCommit(c)); });
+      state.commits = map;
+    }
+    state.branches = sortBranches(state.branches);
+    if (!state.cmpHead || !state.branches.find(b=>b.name===state.cmpHead)){
+      const feature = state.branches.find(b => !["main","master","staging","develop"].includes(b.name));
+      state.cmpHead = feature ? feature.name : (state.branches[0] && state.branches[0].name);
+    }
+    if (!state.branches.find(b=>b.name===state.cmpBase)) state.cmpBase = (state.branches.find(b=>b.name==="main"||b.name==="master")||state.branches[0]||{}).name;
+    state.order = topoOrder();
+    state.selected = state.order[0] || null;
+  } catch(e){ state.error = e.message || String(e); }
+  state.loading = false; render();
+}
+function sortBranches(list){
+  const rank = n => n==="main"||n==="master" ? 0 : n==="staging" ? 1 : n==="develop" ? 2 : 3;
+  return list.slice().sort((a,b) => rank(a.name)-rank(b.name) || a.name.localeCompare(b.name));
+}
+
+/* ---------- Graph ---------- */
+function topoOrder(){
+  return [...state.commits.values()].sort((a,b) => new Date(b.date) - new Date(a.date)).map(c => c.sha);
+}
+function reachable(fromSha){
+  const seen = new Set(), stack = [fromSha];
+  while (stack.length){ const s = stack.pop(); if (!s || seen.has(s) || !state.commits.has(s)) continue; seen.add(s); stack.push(...state.commits.get(s).parents); }
+  return seen;
+}
+function layout(order){
+  let lanes = []; const rows = []; let max = 1;
+  const firstFree = () => { const i = lanes.indexOf(null); return i === -1 ? lanes.length : i; };
+  for (const sha of order){
+    const c = state.commits.get(sha);
+    const before = lanes.slice();
+    let idx = lanes.indexOf(sha);
+    if (idx === -1){ idx = firstFree(); lanes[idx] = sha; }
+    const merging = []; // other lanes that also pointed at this commit
+    lanes.forEach((v,i) => { if (v === sha && i !== idx){ merging.push(i); lanes[i] = null; } });
+    const parents = c.parents.filter(p => state.commits.has(p));
+    if (!parents.length) lanes[idx] = null;
+    else {
+      const p0 = parents[0], at = lanes.indexOf(p0);
+      lanes[idx] = (at !== -1 && at !== idx) ? null : p0;
+      for (const p of parents.slice(1)){ if (lanes.indexOf(p) === -1){ const f = firstFree(); lanes[f] = p; } }
+    }
+    while (lanes.length && lanes[lanes.length-1] === null) lanes.pop();
+    const before2 = before.slice(); if (before2.indexOf(sha) === -1){ before2[idx] = undefined; }
+    rows.push({sha, idx, before, after:lanes.slice(), parents, isNewTip: before.indexOf(sha) === -1});
+    max = Math.max(max, before.length, lanes.length, idx+1);
+  }
+  return {rows, max};
+}
+const LW = 16, RH = 52;
+function rowSvg(r, max){
+  const w = max*LW + 8, mid = RH/2, x = i => 4 + i*LW + LW/2;
+  let s = `<svg width="${w}" height="${RH}" viewBox="0 0 ${w} ${RH}" aria-hidden="true">`;
+  r.before.forEach((v,j) => { if (!v) return;
+    if (v === r.sha) s += `<path d="M${x(j)} 0 C${x(j)} ${mid*.6} ${x(r.idx)} ${mid*.4} ${x(r.idx)} ${mid}" stroke="${laneColor(j)}" stroke-width="2" fill="none"/>`;
+    else s += `<line x1="${x(j)}" y1="0" x2="${x(j)}" y2="${mid}" stroke="${laneColor(j)}" stroke-width="2"/>`;
+  });
+  r.after.forEach((v,k) => { if (!v) return;
+    if (r.parents.includes(v) && !(r.before[k] === v && k !== r.idx)) {
+      s += `<path d="M${x(r.idx)} ${mid} C${x(r.idx)} ${mid+mid*.6} ${x(k)} ${mid+mid*.4} ${x(k)} ${RH}" stroke="${laneColor(k)}" stroke-width="2" fill="none"/>`;
+    } else {
+      const j = r.before.indexOf(v);
+      const from = j === -1 ? k : j;
+      s += `<path d="M${x(from)} ${mid} C${x(from)} ${mid+mid*.6} ${x(k)} ${mid+mid*.4} ${x(k)} ${RH}" stroke="${laneColor(k)}" stroke-width="2" fill="none"/>`;
+    }
+  });
+  // edges into parents that already live in other lanes (merge into existing line)
+  r.parents.forEach(p => { const k = r.after.indexOf(p); if (k === -1){ const j = r.before.indexOf(p); if (j !== -1) s += `<path d="M${x(r.idx)} ${mid} C${x(r.idx)} ${mid+mid*.6} ${x(j)} ${mid+mid*.4} ${x(j)} ${RH}" stroke="${laneColor(j)}" stroke-width="2" fill="none"/>`; } });
+  const merge = r.parents.length > 1;
+  s += merge ? `<circle cx="${x(r.idx)}" cy="${mid}" r="5" fill="var(--panel)" stroke="${laneColor(r.idx)}" stroke-width="2.5"/>`
+             : `<circle cx="${x(r.idx)}" cy="${mid}" r="5" fill="${laneColor(r.idx)}"/>`;
+  return s + `</svg>`;
+}
+
+/* ---------- Rendering ---------- */
+function refsFor(sha){
+  return state.branches.filter(b => b.sha === sha).map(b => {
+    const color = b.name==="main"||b.name==="master" ? "var(--l0)" : b.name==="staging" ? "var(--l2)" : "var(--l1)";
+    return `<span class="ref" style="color:${color}">${esc(b.name)}</span>`;
+  }).join("");
+}
+function branchColor(b){ return b.name==="main"||b.name==="master" ? "var(--l0)" : b.name==="staging" ? "var(--l2)" : "var(--l1)"; }
+
+function renderBranches(){
+  const html = state.branches.map(b => `<button class="branch" data-branch="${esc(b.name)}" aria-pressed="${state.focus===b.name}">
+      <span class="dot" style="background:${branchColor(b)}"></span><span class="name">${esc(b.name)}</span>${b.protected?'<span class="tag">protected</span>':""}</button>`).join("");
+  $("branchList").innerHTML = (state.branches.length ? `<button class="branch" data-branch="" aria-pressed="${!state.focus}"><span class="dot" style="background:var(--muted)"></span><span class="name">All branches</span></button>` + html : "")
+    + `<p class="hint">Tap a branch to highlight its commits.</p>`;
+  $("branchChips").innerHTML = `<button class="branch" data-branch="" aria-pressed="${!state.focus}"><span class="name">All</span></button>` + html;
+}
+
+function renderHistory(){
+  if (!state.order.length) return `<div class="empty">No commits loaded.</div>`;
+  const {rows, max} = layout(state.order);
+  const focusSet = state.focus ? reachable((state.branches.find(b=>b.name===state.focus)||{}).sha) : null;
+  return `<div class="pane-h">History · ${state.order.length} commits</div><div class="rows">` + rows.map(r => {
+    const c = state.commits.get(r.sha);
+    const first = c.msg.split("\n")[0];
+    const dim = focusSet && !focusSet.has(r.sha) ? " dim" : "";
+    return `<button class="row${dim}" data-sha="${r.sha}" aria-current="${state.selected===r.sha}">${rowSvg(r, max)}
+      <span class="txt"><span class="msg"><span class="refs">${refsFor(r.sha)}</span>${esc(first)}</span>
+      <span class="meta"><span class="mono">${r.sha.slice(0,7)}</span><span>${esc(c.author)}</span><span>${relTime(c.date)}</span></span></span></button>`;
+  }).join("") + `</div>`;
+}
+
+function parsePatch(patch){
+  if (!patch) return `<div class="empty" style="padding:12px">No text diff (binary file or too large to show).</div>`;
+  let o = 0, n = 0, out = "";
+  for (const line of patch.split("\n")){
+    const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line);
+    if (m){ o = +m[1]; n = +m[2]; out += `<tr class="hunk"><td class="n"></td><td class="n"></td><td class="c">${esc(line)}</td></tr>`; continue; }
+    const t = line[0];
+    if (t === "+") out += `<tr class="add"><td class="n"></td><td class="n">${n++}</td><td class="c">${esc(line)}</td></tr>`;
+    else if (t === "-") out += `<tr class="del"><td class="n">${o++}</td><td class="n"></td><td class="c">${esc(line)}</td></tr>`;
+    else if (t === "\\") out += `<tr><td class="n"></td><td class="n"></td><td class="c" style="color:var(--muted)">${esc(line)}</td></tr>`;
+    else out += `<tr><td class="n">${o++}</td><td class="n">${n++}</td><td class="c">${esc(line)}</td></tr>`;
+  }
+  return `<div class="diff"><table>${out}</table></div>`;
+}
+function filesHtml(files){
+  if (!files) return `<div class="empty"><span class="spin"></span> Loading changed files…</div>`;
+  if (!files.length) return `<p class="note" style="margin:0">No file changes in this commit (merge commit). Pick a commit on the branch to see its diff.</p>`;
+  const add = files.reduce((s,f)=>s+(f.additions||0),0), del = files.reduce((s,f)=>s+(f.deletions||0),0);
+  return `<div class="stat">${files.length} file${files.length>1?"s":""} changed · <span class="a">+${add}</span> <span class="d">−${del}</span></div>` +
+    files.map((f,i) => `<details class="file" ${i<4?"open":""}><summary><span class="badge ${esc(f.status)}">${esc(f.status)}</span><span class="fn">${esc(f.filename)}</span>
+      <span class="stat"><span class="a">+${f.additions||0}</span> <span class="d">−${f.deletions||0}</span></span></summary>${parsePatch(f.patch)}</details>`).join("");
+}
+function ghUrl(path){ return state.live ? `https://github.com/${state.repo}${path}` : null; }
+
+function renderCommitDetail(){
+  const c = state.selected && state.commits.get(state.selected);
+  if (!c) return `<div class="empty">Select a commit to see its diff.</div>`;
+  if (c.files === null && state.live) loadFiles(c);
+  const [title, ...rest] = c.msg.split("\n");
+  const body = rest.join("\n").trim();
+  const url = ghUrl(`/commit/${c.sha}`);
+  return `<div class="pane-h"><button class="btn back" data-close>‹ Back</button>Commit</div><div class="detail">
+    <h2 class="dt-title">${esc(title)}</h2>${body?`<p class="note" style="margin:0;white-space:pre-wrap">${esc(body)}</p>`:""}
+    <dl class="kv"><dt>Commit</dt><dd class="mono">${c.sha.slice(0,12)}</dd><dt>Author</dt><dd>${esc(c.author)}</dd><dt>Date</dt><dd>${fullTime(c.date)}</dd>
+    <dt>Parents</dt><dd class="mono">${c.parents.map(p=>`<button class="btn" style="padding:1px 6px;font-size:12px" data-sha="${p}">${p.slice(0,7)}</button>`).join(" ")||"—"}</dd>
+    ${refsFor(c.sha)?`<dt>Branches</dt><dd>${refsFor(c.sha)}</dd>`:""}</dl>
+    ${url?`<a class="link" href="${url}" target="_blank" rel="noopener">Open on GitHub ↗</a>`:""}
+    ${filesHtml(c.files)}</div>`;
+}
+const loadingFiles = new Set();
+async function loadFiles(c){
+  if (loadingFiles.has(c.sha)) return; loadingFiles.add(c.sha);
+  try { const full = await gh(`/repos/${state.repo}/commits/${c.sha}`); c.files = full.files || []; }
+  catch(e){ c.files = []; c.filesError = e.message; }
+  renderDetail();
+}
+
+/* compare */
+const cmpCache = new Map();
+async function computeCompare(base, head){
+  const key = base + "..." + head;
+  if (cmpCache.has(key)) return cmpCache.get(key);
+  let result;
+  if (state.live){
+    const j = await gh(`/repos/${state.repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`);
+    result = {ahead:j.ahead_by, behind:j.behind_by, commits:j.commits.map(fromApiCommit).reverse(), files:j.files||[]};
+  } else {
+    const b = state.branches.find(x=>x.name===base), h = state.branches.find(x=>x.name===head);
+    const rb = reachable(b.sha), rh = reachable(h.sha);
+    const ahead = state.order.filter(s => rh.has(s) && !rb.has(s)).map(s => state.commits.get(s));
+    const behind = state.order.filter(s => rb.has(s) && !rh.has(s));
+    const files = [];
+    ahead.slice().reverse().forEach(c => (c.files||[]).forEach(f => files.push(f)));
+    result = {ahead:ahead.length, behind:behind.length, commits:ahead, files};
+  }
+  cmpCache.set(key, result); return result;
+}
+function renderCompare(){
+  const opts = sel => state.branches.map(b => `<option ${b.name===sel?"selected":""}>${esc(b.name)}</option>`).join("");
+  return `<div class="pane-h">Compare branches</div>
+    <div class="cmp-bar"><label class="note" for="cmpHead">Branch</label><select id="cmpHead">${opts(state.cmpHead)}</select>
+    <span class="note">into</span><select id="cmpBase" aria-label="Base branch">${opts(state.cmpBase)}</select></div>
+    <div id="cmpBody"><div class="empty"><span class="spin"></span> Comparing…</div></div>`;
+}
+async function fillCompare(){
+  const body = $("cmpBody"); if (!body) return;
+  const head = state.cmpHead, base = state.cmpBase;
+  if (head === base){ body.innerHTML = `<div class="empty">Pick two different branches.</div>`; $("detail").innerHTML = `<div class="empty">Pick two different branches to see the combined diff.</div>`; return; }
+  try{
+    const r = await computeCompare(base, head);
+    if (state.cmpHead !== head || state.cmpBase !== base) return;
+    const prUrl = ghUrl(`/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?expand=1`);
+    body.innerHTML = `<div class="ab"><div><b>${r.ahead}</b> commit${r.ahead===1?"":"s"} to merge</div><div><b>${r.behind}</b> behind ${esc(base)}</div></div>
+      <div style="padding:0 16px 12px" class="note">${r.ahead===0?`Everything on <span class="mono">${esc(head)}</span> is already in <span class="mono">${esc(base)}</span>.`
+        : prUrl?`<a class="link" href="${prUrl}" target="_blank" rel="noopener">Open a pull request on GitHub ↗</a>`:`Connect a real repo to open a pull request from here.`}
+        ${r.behind>0&&r.ahead>0?` The branch is behind; merge or rebase ${esc(base)} into it before merging if your team requires it.`:""}</div>
+      <div class="rows">${r.commits.map(c => `<button class="row" data-sha="${c.sha}" style="grid-template-columns:minmax(0,1fr);padding-left:16px"><span class="txt"><span class="msg">${esc(c.msg.split("\n")[0])}</span>
+        <span class="meta"><span class="mono">${c.sha.slice(0,7)}</span><span>${esc(c.author)}</span><span>${relTime(c.date)}</span></span></span></button>`).join("")}</div>`;
+    $("detail").innerHTML = `<div class="pane-h"><button class="btn back" data-close>‹ Back</button>Combined diff</div><div class="detail">${filesHtml(r.files)}</div>`;
+  } catch(e){ body.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; }
+}
+
+function renderDetail(){
+  if (state.view === "history") $("detail").innerHTML = renderCommitDetail();
+}
+function render(){
+  $("modeTag").textContent = state.live ? "Live" : "Sample repo";
+  $("repoName").textContent = state.repo;
+  $("connectBtn").textContent = state.live ? "Settings" : "Connect GitHub";
+  $("tabHistory").setAttribute("aria-selected", state.view==="history");
+  $("tabCompare").setAttribute("aria-selected", state.view==="compare");
+  renderBranches();
+  if (state.loading){ $("center").innerHTML = `<div class="empty"><span class="spin"></span> Loading ${esc(state.repo)}…</div>`; $("detail").innerHTML = ""; return; }
+  if (state.error){ $("center").innerHTML = `<div class="empty"><p class="err">${esc(state.error)}</p><button class="btn" id="errSettings">Check settings</button></div>`; $("detail").innerHTML = ""; return; }
+  if (state.view === "history"){ $("center").innerHTML = renderHistory(); renderDetail(); }
+  else { $("center").innerHTML = renderCompare(); fillCompare(); }
+}
+
+/* ---------- Events ---------- */
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-sha],[data-branch],[data-close],#errSettings");
+  if (!t) return;
+  if (t.id === "errSettings") return openSheet();
+  if (t.hasAttribute("data-close")) return $("detailPane").classList.remove("open");
+  if (t.hasAttribute("data-branch")){ state.focus = t.dataset.branch || null; if (state.view!=="history"){ state.view="history"; } render(); return; }
+  if (t.dataset.sha){
+    if (state.view === "compare"){
+      const c = state.commits.get(t.dataset.sha) || null;
+      state.view = "history"; state.selected = t.dataset.sha;
+      if (!c){ $("center").innerHTML = renderHistory(); return; }
+    }
+    state.selected = t.dataset.sha;
+    render(); $("detailPane").classList.add("open"); $("detailPane").scrollTop = 0;
+  }
+});
+document.addEventListener("change", e => {
+  if (e.target.id === "cmpHead"){ state.cmpHead = e.target.value; fillCompareFresh(); }
+  if (e.target.id === "cmpBase"){ state.cmpBase = e.target.value; fillCompareFresh(); }
+});
+function fillCompareFresh(){ $("cmpBody").innerHTML = `<div class="empty"><span class="spin"></span> Comparing…</div>`; fillCompare(); }
+$("tabHistory").onclick = () => { state.view = "history"; render(); };
+$("tabCompare").onclick = () => { state.view = "compare"; render(); $("detailPane").classList.remove("open"); };
+$("reloadBtn").onclick = () => { cmpCache.clear(); loadRepo(); };
+
+function openSheet(){
+  $("cfgRepo").value = state.live ? state.repo : (store.get("pgv.repo") || "");
+  $("cfgToken").value = state.token;
+  $("cfgRemember").checked = !!store.get("pgv.token");
+  $("cfgErr").hidden = true; $("sheet").hidden = false; $("cfgRepo").focus();
+}
+$("connectBtn").onclick = openSheet;
+$("cfgCancel").onclick = () => { $("sheet").hidden = true; };
+$("useSample").onclick = () => { state.live = false; state.repo = "acme/orders-api"; state.token = ""; store.del("pgv.token"); store.del("pgv.repo"); cmpCache.clear(); state.focus=null; $("sheet").hidden = true; loadRepo(); };
+$("cfgForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const repo = $("cfgRepo").value.trim().replace(/^https?:\/\/github\.com\//,"").replace(/\.git$/,"").replace(/\/$/,"");
+  const token = $("cfgToken").value.trim();
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)){ $("cfgErr").textContent = "Enter the repository as owner/name, for example your-org/orders-api."; $("cfgErr").hidden = false; return; }
+  if (!token){ $("cfgErr").textContent = "Paste a GitHub token to read a private repo."; $("cfgErr").hidden = false; return; }
+  state.live = true; state.repo = repo; state.token = token; state.focus = null; cmpCache.clear();
+  if ($("cfgRemember").checked){ store.set("pgv.token", token); store.set("pgv.repo", repo); } else { store.del("pgv.token"); store.set("pgv.repo", repo); }
+  $("sheet").hidden = true; loadRepo();
+});
+
+/* boot */
+const savedTok = store.get("pgv.token"), savedRepo = store.get("pgv.repo");
+if (savedTok && savedRepo){ state.live = true; state.token = savedTok; state.repo = savedRepo; }
+loadRepo();
+})();
+</script>
